@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+
+
+
 from ciscoconfparse import CiscoConfParse 
 import re
 
@@ -222,13 +226,47 @@ class Acl:
         parsed_acl[linenum] = parsed
         (self.aces).update(parsed_acl)
 
-accessList = []
-accessgroup = []
 
-cisco_cfg = CiscoConfParse("../inputs/noc-fw-conf.txt",syntax='asa')
+from argparse import ArgumentParser
 
-al = cisco_cfg.find_objects(r"^access-list ")
-ag = cisco_cfg.find_objects(r"^access-group")
+if __name__ == '__main__':
+
+    parser = ArgumentParser(description='Select options.')
+
+    # Input parameters
+    parser.add_argument('-conf', '--conf', type=str, required=True,
+                        help="ASA config path/filename")
+    parser.add_argument('-aclname', '--aclname', type=str, default='',
+                        help="Name of ACL to convert. If empty => convert ALL.")
+    parser.add_argument('-conftype', '--conftype', type=str, default='asa',
+                        help="Type of config file: asa|ios. Default: asa")
+        
+    args = parser.parse_args()
+
+    conf_file = args.conf
+    inputaclname = args.aclname
+    conftype = args.conftype
+    
+    accessList = []
+    accessgroup = []
+        
+    cisco_cfg = CiscoConfParse(conf_file,syntax=conftype)
+
+#        url = "http://" + host + ":" + port + "/restconf/api/running/"
+
+#        headers = {
+#           "Content-Type": "application/vnd.yang.datastore+json",
+#           "Accept": "application/vnd.yang.datastore+json",
+#           }
+#        response = requests.request("GET", url, headers=headers, auth=(username,password))
+
+#    print(response.text)
+
+
+#        cisco_cfg = CiscoConfParse("../inputs/noc-fw-conf.txt",syntax='asa')
+
+al = cisco_cfg.find_objects(r"^access-list " + inputaclname)
+ag = cisco_cfg.find_objects(r"^access-group " + inputaclname)
 
 final = Acl()
 
@@ -236,22 +274,12 @@ for item in ag:
     accessgroup = ((item.text).split(" "))[1]    
     al = cisco_cfg.find_objects(r"access-list " + accessgroup)
     tmp = accessgroup
-
+    print (tmp)
     final.aclname = re.sub(r"-in", "", tmp, 0)
 
-    
-#    print('\n',accessgroup)
-#    print ('final.aclname: ', final.aclname)
+    for i in al:
+        final.append_ace(((i.text).split(" ")),i.linenum)
 
-###for i in al:
-###    final.append_ace(((i.text).split(" ")),i.linenum)
-
-#print('++++++++++++++++++++++++++++++++++++++++++++++++++++')
-#print (final.aces)
-#    print (x)
-
-###print ('Port objects: ', final.find_objects('port'))
-###print ('Network objects: ', final.find_objects('net'))
-
-#print ('%%%%%%%%%%%%%%%%% FINAL: ', final)
-
+    print ('Generating objects for ACL name: ', final.aclname)
+    print ('Port objects: ', final.find_objects('port'))
+    print ('Network objects: ', final.find_objects('net'))

@@ -7,19 +7,13 @@ functions to push config to FTD/FMC using API
 import json
 import sys
 import requests
- 
-server = "https://10.99.3.204"
- 
-username = "skipi"
-if len(sys.argv) > 1:
-    username = sys.argv[1]
-password = "johnny"
-if len(sys.argv) > 2:
-    password = sys.argv[2]
-
-
 
 def get_token(username, password, server, headers):
+    '''
+    get auth token from FMC using credentials
+    '''
+
+    print("### Getting auth token ...")
     r = None
 #    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
     api_auth_path = "/api/fmc_platform/v1/auth/generatetoken"
@@ -32,19 +26,22 @@ def get_token(username, password, server, headers):
         auth_headers = r.headers
         auth_token = auth_headers.get('X-auth-access-token', default=None)
         if auth_token == None:
-            print("auth_token not found. Exiting...")
+            print("### Auth_token not found. Exiting...")
             sys.exit()
         else:
             return(auth_token)
     except Exception as err:
-        print ("Error in generating auth token --> "+str(err))
+        print ("### Error in generating auth token --> "+str(err))
         sys.exit()
 
-
 def get_auditrecords(auth_token, server, headers): 
+    '''
+    get audit records from FMC
+    '''
 #    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
 #    headers['X-auth-access-token']=auth_token
  
+    print ('### Getting audit records ...')
     api_path = "/api/fmc_platform/v1/domain/e276abec-e0f2-11e3-8169-6d9ed49b625f/audit/auditrecords"    # param
     url = server + api_path
     if (url[-1] == '/'):
@@ -69,6 +66,10 @@ def get_auditrecords(auth_token, server, headers):
         if r : r.close()
 
 def get_anyprotocolportobjects(auth_token, server, headers):
+    '''
+    get any protocol or port object from FMC
+    '''
+    print('### Getting all protocol and port objects ...')
     api_path = "/api/fmc_config/v1/domain/e276abec-e0f2-11e3-8169-6d9ed49b625f/object/anyprotocolportobjects"    # param
     url = server + api_path
     if (url[-1] == '/'):
@@ -92,8 +93,11 @@ def get_anyprotocolportobjects(auth_token, server, headers):
     finally:
         if r : r.close()
 
-def insert_hostobject(auth_token, server, headers, hostip, hostdesc, hostid, hostname):
-
+def insert_hostobject(auth_token, server, headers, hostname, hostip, hostdesc = "", hostid = ""):
+    '''
+    insert defined host object to FMC	
+    '''
+    print('### Inserting HOST object into FMC ... ', hostname)
     api_path = "/api/fmc_config/v1/domain/e276abec-e0f2-11e3-8169-6d9ed49b625f/object/hosts"    # param
     
     url = server + api_path
@@ -110,59 +114,46 @@ def insert_hostobject(auth_token, server, headers, hostip, hostdesc, hostid, hos
         resp = r.text
         json_resp = json.loads(resp)
         if (status_code in (200,201,202,203)):
-            print("Put was successful ... error code: ", r.status_code)
-            print(json.dumps(json_resp,sort_keys=True,indent=4, separators=(',', ': ')))
-
+            print("HOST insert was successful ... error code: ", r.status_code)
+#            print(json.dumps(json_resp,sort_keys=True,indent=4, separators=(',', ': ')))
+            print('Inserted HOST ID: ', parseJsonError(json_resp, 'hostid'))
+            return(parseJsonError(json_resp, 'hostid'))
         elif (status_code == 400):
 #            error_message = re.sub(regex2,subst,re.sub(regex1,subst, str(json_resp['error']['messages']), 0), 0)
-            print('Problem --> error code 400: ', parseJsonError(json_resp))
-
+            print('Problem inserting HOST --> error code 400: ', parseJsonError(json_resp, 'error'))
+            return(False)
         else:
             r.raise_for_status()
             print("Error code --> "+str(status_code))
             print("Error occurred in PUT --> "+str(resp))
+            return(False)
     except requests.exceptions.HTTPError as err:
         print ("Error in connection --> "+str(err))
     finally:
         if r: r.close()
 
-def insert_networkgroup(auth_token, server, headers):
-# ngtype, ngid, ngname):
 
+def insert_networkgroup(auth_token, server, headers, ngname, ngitems, objnumber):
+    '''
+    insert network group into FMC
+    '''
+    post_data = {"name": ngname}
+    tmpobj_data = {}
+    tmplist = []
+
+    print('### Inserting NETWORK GROUP into FMC ... ', ngname)
     api_path = "/api/fmc_config/v1/domain/e276abec-e0f2-11e3-8169-6d9ed49b625f/object/networkgroups"    # param
     url = server + api_path
     if (url[-1] == '/'):
         url = url[:-1]
- 
-    post_data = {
-      "name": "networkgroup_obj1",
-      "objects": [
-        {
-          "type": "Network",
-          "id": "NetworkObjectUUID"
-        },
-        {
-          "type": "Host",
-          "id": "HostObjectUUID"
-        },
-        {
-          "type": "Range",
-          "id": "RangeObjectUUID"
-        }
-      ],
-      "literals": [
-        {
-          "type": "Network",
-          "value": "1.2.3.0/24"
-        },
-        {
-          "type": "Host",
-          "value": "1.2.3.4"
-        }
-      ],
-      "type": "NetworkGroup"
-    }
-    
+
+    for x in ngitems:
+         tmplist.insert(1, {"type": "Host","id": ngitems[x]})         
+    post_data["objects"] = tmplist
+    post_data["type"] = "NetworkGroup"
+
+#    print (tmplist)
+#    print (json.dumps(post_data))
 
     try:
         r = requests.post(url, data=json.dumps(post_data), headers=headers, verify=False)
@@ -173,10 +164,10 @@ def insert_networkgroup(auth_token, server, headers):
         print("Status code is: "+str(status_code))
         json_resp = json.loads(resp)
         if status_code == 201 or status_code == 202:
-            print("Put was successful ... error code: ", r.status_code)
+            print("NETWORK GROUP insert was successful ... error code: ", r.status_code)
             print(json.dumps(json_resp,sort_keys=True,indent=4, separators=(',', ': ')))
         elif (status_code == 400):
-            print('Problem --> error code 400: ', parseJsonError(json_resp))
+            print('Problem inserting NETWORK GROUP --> error code 400: ', parseJsonError(json_resp, 'error'))
         else :
             r.raise_for_status()
             print ("Error occurred in POST --> "+resp)
@@ -185,46 +176,71 @@ def insert_networkgroup(auth_token, server, headers):
     finally:
         if r: r.close()
 
-def parseJsonError(json_resp):
+def parseJsonError(json_resp, what):
+    '''
+    fnc for parsing JSON error response from FMC server
+    '''
+    print('### Parsing JSON response from FMC ... ')    
     import re
 
     subst = ""
-    regex1 = r"^\[\{\'.+\'\:\ \'(\<html\>)\ "
-    regex2 = r"\<br\>.+"
-
-    return(re.sub(regex2,subst,re.sub(regex1,subst, str(json_resp['error']['messages']), 0), 0))
-
-
+    if what == 'error':
+        regex1 = r"^\[\{\'.+\'\:\ \'(\<html\>)\ "
+        regex2 = r"\<br\>.+"
+        parsed_response = re.sub(regex2,subst,re.sub(regex1,subst, str(json_resp['error']['messages']), 0), 0)
+    elif what == 'hostid':
+        parsed_response = json_resp['id']
+    return(parsed_response)
 
 ################################################################################################################################################
 
 def main():
     import random
-#    objnumber = str(random.randrange(1,254))
+    import yaml
+    
+#    
 
-    result = {}
+    config = '../conf/config.yaml'
+
+    print ('### Parsing settings in ', config, '...')
+    with open(config, 'r') as yamlfile:
+        cfg = yaml.load(yamlfile)
+    for section in cfg:
+        username = cfg['FMC']['username']
+        password = cfg['FMC']['password']
+        server = cfg['FMC']['server']
+    if len(sys.argv) > 1:
+        username = sys.argv[1]
+    if len(sys.argv) > 2:
+        password = sys.argv[2]
+
+#    result = {}
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}    
-
     auth_token = get_token(username, password, server, headers)
-
     headers['X-auth-access-token']=auth_token
-
-    for objnumber in (34,45,56):
-        hostip = '10.0.0.' + objnumber
-        hostdesc = 'SKP test object #' + objnumber
-        hostname = 'SkpTestHost' + objnumber
-        hostid = 'hostObjectUUID' + objnumber
-        insert_hostobject(auth_token, server, headers, hostip, hostdesc, hostid, hostname)
+    inserted_host = {}
+    tmp = ''
+    
+    for i in (1,2,3):
+        objnumber = str(random.randrange(1,254))
+        hostip = '10.0.0.' + str(objnumber)
+        hostdesc = 'SKP test object #' + str(objnumber)
+        hostname = 'SkpTestHost' + str(objnumber)
+#        hostid = 'hostObjectUUID' + str(objnumber)
+        inserted_host[objnumber] = insert_hostobject(auth_token, server, headers, hostname, hostip)
         
-#    hostip = '10.0.0.1'
-#    hostdesc = 'SKP test object #1'
-#    hostname = 'SkpTestHost1'
-#    hostid = 'hostObjectUUID1'
+    print ('### Inserted hosts: ', inserted_host)
+    for x in inserted_host:
+        tmp = tmp + '-'+ x
 
+    ngname = 'SkpTestNG' + tmp
+    inserted_ng = insert_networkgroup(auth_token, server, headers, ngname, inserted_host, tmp)
+    
+    print('### Inserted NG ID: ', inserted_ng)
+        
 #    get_auditrecords(auth_token, server, headers)
 #    get_anyprotocolportobjects(auth_token, server, headers)
 #    insert_hostobject(auth_token, server, headers, hostip, hostdesc, hostid, hostname)
-
-#    insert_networkgroup(auth_token, server, headers) 
+#    insert_networkgroup(auth_token, server, headers, ngname) 
     
 main()
