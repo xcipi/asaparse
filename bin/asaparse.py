@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-
-
 from ciscoconfparse import CiscoConfParse 
 import re
 
@@ -31,6 +29,11 @@ class Acl:
     def is_object(self,item):
         if re.search('^object',item):  
             return(True)
+    
+    
+    def src_object(self,item):
+        if re.search('^object$',item):
+            return(True)
             
     def is_host(self,item):
         if item == 'host':
@@ -57,37 +60,29 @@ class Acl:
                     return(True)
                 else:
                     return(False)
- 
         
     def find_objects(self,type):
         '''
         find object items used in acl and return list of them
         type = type of objects to return (net, proto)
         '''
-#        print ('!!!!!!!!!!!!! Vstupujem do find_obj')
         acl_objects = []
-#        print (type)
+#        print('# hladam typ: ',type, ' v ', self.aces)
         for ace in self.aces:
             for item in self.aces[ace]:
-#                print('########################\nPrva cast podmienky: ', self.is_obj(item))
                 if self.is_obj(item) == type:
+#                    print ('++ object', item,' je spravneho typu...')
                     if not self.in_list(self.aces[ace][item], acl_objects):
-#                        print('##############\n druha cast: ', self.in_list(self.aces[ace][item], acl_objects))
-#                        print ('### APPENDING ', self.aces[ace][item], ' in list\n')
+#                        print('+++ object',self.aces[ace][item],' nieje duplicitny...')
                         acl_objects.append(self.aces[ace][item])
-#                        print (acl_objects)
-#                    else:
-#                        print ('### vyzera ze je v liste')
-#                else:
-#                    print('### NBIEJE objekt NET')
-#                print ('\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+#                    else: print ('--- object ', self.aces[ace][item],' je duplicitny...')
+#                else: print ('-- object ', item,' nam nesedi do kramu...' )
         return(list(set(acl_objects)))
                                
     def parse_extended(self,ace, linenum):
-#        print ("### parsing extended ACE ", linenum)  
         parsed_acl = {}
         parsed = {'linenum':linenum}
-        flags = {'src_obj':0, 'src_host':0, 'src_done':0, 'dst_obj':0, 'dstport_obj':0, 'dst_host':0, 'src_ip_done':0, 'dst_ip_done':0, 'dst_port_eq':0}
+        flags = {'src_is_object':0, 'src_obj':0, 'src_host':0, 'src_done':0, 'dst_obj':0, 'dstport_obj':0, 'dst_host':0, 'src_ip_done':0, 'dst_ip_done':0, 'dst_port_eq':0, 'dst_done':0}
         tmp = ""      
  
         for i, subList in enumerate(ace):
@@ -106,24 +101,41 @@ class Acl:
             if i == 5:
 #                print('*** PARSING 5: ', ace[5])
                 if flags['dstport_obj'] == 1:
+#                    print ('dstport_obj == 1 a teda parsed[dst_port_obj] = ', ace[5])
                     parsed['dst_port_obj'] = ace[5]
                 elif self.is_object(ace[5]):
+#                    print ('nastavujem flag src_obj = 1')
                     flags['src_obj'] = 1 
                 elif self.is_host(ace[5]):
+#                    print('nastavuje flag src_host = 1')
                     flags['src_host'] = 1
                 else:
+#                    print ('es=lse parsed[src_ip] = ',ace[5])
                     parsed['src_ip'] = ace[5]
                     flags['src_ip_done'] = 1
                     flags['src_done'] = 1
             if i == 6:
- #               print('*** PARSING 6: ', ace[6])
+#                print('*** PARSING 6: ', ace[6])
                 if flags['src_done'] == 0:
+#                    print('src_done == 0')
                     if flags['src_ip_done'] == 1:
+#                        print('src_ip_done == 1 a teda parsed[src_mask] = ', ace[6])
                         parsed['src_mask'] = ace[6]
-                    if flags['src_obj'] == 1:
+                        flags['src_done'] = 1
+                    elif flags['src_obj'] == 1:
+#                        print('src_obj == 1 a teda parsed[src_obj] = ', ace[6])
                         parsed['src_obj'] = ace[6]
+                        flags['src_done'] = 1
+                    elif self.is_object(ace[6]):
+                        flags['src_obj'] = 1
+                        if self.src_object(ace[6]):
+#                            print('nastavujem flag src_is_object')
+                            flags['src_is_object'] = 1
                     else:
                         parsed['src_ip'] = ace[6]
+#                        print ('inak parsed[src_ip] = ', ace[6])
+                        flags['src_ip_done'] = 1
+                        flags['src_done'] = 1
                 elif self.is_object(ace[6]):
                     flags['dst_obj'] = 1
                 elif self.is_host(ace[6]):
@@ -133,21 +145,29 @@ class Acl:
                     flags['dst_ip_done'] = 1
                     
             if i == 7:
- #               print('*** PARSING 7: ', ace[7])
+#                print('*** PARSING 7: ', ace[7])
                 if ace[7] == 'log':
                     parsed['adv_action'] = 'log'
                 elif ace[4] == 'icmp':
                     parsed['icmp_type'] = ace[7]
+                elif flags['src_done'] == 0:
+                    parsed['src_obj'] = ace[7]
+                    flags['src_ip_done'] = 1
+                    flags['src_done'] = 1
                 elif flags['dst_obj'] == 1:
                     parsed['dst_obj'] = ace[7]
+                    flags['dst_done'] = 1
                 elif flags['dst_host'] == 1:
                     parsed['dst_ip'] = ace[7]
+                    flags['dst_done'] = 1
                 elif self.is_object(ace[7]):
                     flags['dst_obj'] = 1
+#                    print('nastavuje dst_obj')
                 elif self.is_host(ace[7]):
                     flags['dst_host'] = 1
                 elif flags['dst_ip_done'] == 1:
                     parsed['dst_mask'] = ace[7]
+                    flags['dst_done'] = 1
                 else:
                     parsed['dst_ip'] = ace[7]
 
@@ -161,14 +181,17 @@ class Acl:
                     flags['dst_port_eq'] = 1
                 elif flags['dst_obj'] == 1:
                     parsed['dst_obj'] = ace[8]
+                    flags['dst_done'] = 1
                 elif flags['dst_host'] == 1:
                     parsed['dst_ip'] = ace[8]
+                    flags['dst_done'] = 1
                 elif self.is_object(ace[8]):
                     flags['dst_obj'] = 1
                 elif self.is_host(ace[8]):
                     flags['dst_host'] = 1
                 elif flags['dst_ip_done'] == 1:
                     parsed['dst_mask'] = ace[8]
+                    flags['dst_done'] = 1
                 else:
                     parsed['dst_ip'] = ace[8]
 
@@ -181,19 +204,24 @@ class Acl:
                     flags['dst_port_eq'] = 1
                 elif flags['dst_port_eq'] == 1:
                     parsed['dst_port'] = ace[9]
-                elif flags['dst_obj'] == 1:
-                    parsed['dst_obj'] = ace[9]
-                elif flags['dst_host'] == 1:
-                    parsed['dst_ip'] = ace[9]
-                elif self.is_object(ace[9]):
-                    flags['dst_obj'] = 1
-                elif self.is_host(ace[9]):
-                    flags['dst_host'] = 1
-                elif flags['dst_ip_done'] == 1:
-                    parsed['dst_mask'] = ace[9]
-                else:
-                    parsed['dst_ip'] = ace[9]
-
+                elif flags['dst_done'] == 0:
+                    if flags['dst_obj'] == 1:
+                        parsed['dst_obj'] = ace[9]
+                        flags['dst_done'] = 1
+                    elif flags['dst_host'] == 1:
+                        parsed['dst_ip'] = ace[9]
+                        flags['dst_done'] = 1
+                    elif self.is_object(ace[9]):
+                        flags['dst_obj'] = 1
+                        print('nastavuje dst_obj')
+                    elif self.is_host(ace[9]):
+                        flags['dst_host'] = 1
+                    elif flags['dst_ip_done'] == 1:
+                        parsed['dst_mask'] = ace[9]
+                        flags['dst_done'] = 1
+                    else:
+                        parsed['dst_ip'] = ace[9]
+                        flags['dst_done'] = 1
             if i == 10:
 #                print('*** PARSING 10: ', ace[10])
                 if ace[10] == 'log':
@@ -234,7 +262,7 @@ if __name__ == '__main__':
     parser = ArgumentParser(description='Select options.')
 
     # Input parameters
-    parser.add_argument('-conf', '--conf', type=str, required=True,
+    parser.add_argument('-conf', '--conf', type=str, default='',
                         help="ASA config path/filename")
     parser.add_argument('-aclname', '--aclname', type=str, default='',
                         help="Name of ACL to convert. If empty => convert ALL.")
@@ -274,7 +302,7 @@ for item in ag:
     accessgroup = ((item.text).split(" "))[1]    
     al = cisco_cfg.find_objects(r"access-list " + accessgroup)
     tmp = accessgroup
-    print (tmp)
+#    print (tmp)
     final.aclname = re.sub(r"-in", "", tmp, 0)
 
     for i in al:
@@ -282,4 +310,15 @@ for item in ag:
 
     print ('Generating objects for ACL name: ', final.aclname)
     print ('Port objects: ', final.find_objects('port'))
+    for pgs in final.find_objects('port'):
+        pg = cisco_cfg.find_objects(r"^object*" + pgs)
+        print (pg)
     print ('Network objects: ', final.find_objects('net'))
+    for ngs in final.find_objects('net'):
+        print ('\nNG: ', ngs)
+        ng = cisco_cfg.find_objects('object-group network ' + ngs)
+        if ng:
+            for i in ng:
+                for child in i.children:
+                    print((child.text).split(" ")[3])
+ ########### tuto pokracuj !!! ####
