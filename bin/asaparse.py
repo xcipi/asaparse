@@ -2,6 +2,8 @@
 
 from ciscoconfparse import CiscoConfParse 
 import re
+import pprint
+
 
 class Acl:
     '''ACL class holds whole ACL'''
@@ -255,6 +257,83 @@ class Acl:
         (self.aces).update(parsed_acl)
 
 
+def resolve_object(objname):
+    '''
+    find and parse object by its name
+    out: dict: type: OBJTYPE, name: OBJNAME, paramType: PARAMTYPE, parameter:PARAMETER
+    r"object (network|port|range) .+$" 
+    '''
+    
+    obj_dict = {}
+    obj = cisco_cfg.find_children(r"object (service|network) " + objname + "$")
+    if obj: 
+        n=0
+        for item in obj:
+            lineSplit = item.split()
+            if n == 0:
+                obj_dict['type'] = lineSplit[1]
+                obj_dict['name'] = lineSplit[2]
+            else:
+                if obj_dict['type'] == 'network': 
+                    obj_dict['paramType'] = lineSplit[0]
+                    obj_dict['IpAddress'] = lineSplit[1]
+                    if len(lineSplit)>2:
+                        obj_dict['NetMask'] = lineSplit[2]
+                elif obj_dict['type'] == 'service':
+                    obj_dict['paramType'] = lineSplit[0]
+                    obj_dict['proto'] = lineSplit[1]
+                    obj_dict['srcdest'] = lineSplit[2]
+                    obj_dict['oper'] = lineSplit[3]
+                    obj_dict['port'] = lineSplit[4]
+            n+=1
+        return (obj_dict)
+    else:
+        return (False)
+
+
+def resolve_group(grpname):
+    '''
+    find and parse object group by its name
+    r"object-group (network|port|range) .+$" 
+    '''
+    
+    grp_dict = {}
+    grp = cisco_cfg.find_children(r"object-group (service|network) " + grpname)
+    if grp: 
+        n=0
+        for item in grp:
+            lineSplit = item.split()
+#            print(lineSplit)
+            if n == 0:
+                grp_dict['type'] = lineSplit[1]
+                grp_dict['name'] = lineSplit[2]
+                if len(lineSplit) == 4: grp_dict['proto'] = lineSplit[3]
+            elif grp_dict['type'] == 'network':
+                print(lineSplit)
+                grp_dict['itemtype'] = lineSplit[1]
+                grp_dict['itemname'] = lineSplit[2]
+ #               print ('netgrp')
+            elif grp_dict['type'] == 'service':
+                if lineSplit[0] == 'description':
+                    print ('desc')
+                elif lineSplit[0] == 'service-object':
+                    grp_dict['proto'] = lineSplit[1]
+                    if lineSplit[1] == 'icmp':
+                        grp_dict['code'] = lineSplit[2]
+                    else:
+                        grp_dict['srcdst'] = lineSplit[2]
+                        grp_dict['oper'] = lineSplit[3]
+                        grp_dict['port'] = lineSplit[4]
+                elif lineSplit[0] == 'port-object':
+                    grp_dict['proto'] = lineSplit[1]
+                    grp_dict['srcdst'] = lineSplit[2]
+            else: print ('FATAL: Unknown group!!!')
+            n+=1
+        return (grp_dict)
+    else:
+        return (False)
+
+#################################################################################################
 from argparse import ArgumentParser
 
 if __name__ == '__main__':
@@ -296,7 +375,10 @@ if __name__ == '__main__':
 al = cisco_cfg.find_objects(r"^access-list " + inputaclname)
 ag = cisco_cfg.find_objects(r"^access-group " + inputaclname)
 
+pp = pprint.PrettyPrinter(indent=4)
+
 final = Acl()
+#testgrp = ASAObjGroupNetwork()
 
 for item in ag:
     accessgroup = ((item.text).split(" "))[1]    
@@ -308,17 +390,66 @@ for item in ag:
     for i in al:
         final.append_ace(((i.text).split(" ")),i.linenum)
 
-    print ('Generating objects for ACL name: ', final.aclname)
-    print ('Port objects: ', final.find_objects('port'))
-    for pgs in final.find_objects('port'):
-        pg = cisco_cfg.find_objects(r"^object*" + pgs)
-        print (pg)
-    print ('Network objects: ', final.find_objects('net'))
-    for ngs in final.find_objects('net'):
-        print ('\nNG: ', ngs)
-        ng = cisco_cfg.find_objects('object-group network ' + ngs)
-        if ng:
-            for i in ng:
-                for child in i.children:
-                    print((child.text).split(" ")[3])
- ########### tuto pokracuj !!! ####
+####################################################################################
+#######################  GENERATING OBJECTS ########################################
+####################################################################################
+    final_objects = []
+    acl_objects = []
+    print ('# Generating OBJECTS for ACL name: ', final.aclname)
+    print ('## SERVICE objects: ', final.find_objects('port'))
+    
+#    for pgname in final.find_objects('port'):
+#        result = resolve_object(pgname)
+    result = resolve_object('SERVOBJECT1')
+    if result: 
+        print ('### Resolved SERVICE objects: ',result)
+        acl_objects.append(result)
+    
+    print ('\n## Network objects: ', final.find_objects('net'))
+    for ngname in final.find_objects('net'):
+        result = resolve_object(ngname)
+        if result: 
+            print ('### Resolved NET objects: ',result)
+            acl_objects.append(result)
+                
+    print ('\n# Final objects list: ')
+    pp.pprint(acl_objects)
+    
+    print ('=========================================================\n')
+    
+    acl_groups = []
+    final_groups = []
+    
+    print ('# Generating groups for ACL name: ', final.aclname)
+    print ('## Port groups: ', final.find_objects('port'))
+    
+    for pgname in final.find_objects('port'):
+        result = resolve_group(pgname)
+        if result: 
+            acl_groups.append(result)
+            print ('### Resolved PG',result)
+    
+    print ('\n## Network groups: ', final.find_objects('net'))
+    
+    for ngname in final.find_objects('net'):
+        result = resolve_group(ngname)
+        if result: 
+            acl_groups.append(result)
+            print ('### Resolved network-groups ',result)
+    
+    print ('\n# Final object-groups list: ')
+    pp.pprint(acl_groups)
+    
+'''
+    object moze obsahovat:
+    - network
+     - host IP
+     - range IP_first IP_last
+     - 
+    object-group moze obsahovat:
+    - network
+     - network-object object NAME
+     
+    - service 
+     - service-object PROTO destination eq PORT
+'''
